@@ -3,23 +3,25 @@
 Connects an AI assistant to Involve Asia company data through Kairos.
 
 ```bash
-npx github:Involve-Asia/kairos-cli auth login
-npx github:Involve-Asia/kairos-cli mcp install
+npx github:Involve-Asia/kairos-cli setup
 ```
 
-Or install it once:
+That is the whole thing. It signs you in through the browser and configures
+whichever assistant you have. Restart the assistant afterwards.
+
+Prefer to keep it around?
 
 ```bash
 npm i -g github:Involve-Asia/kairos-cli
-kairos auth login
-kairos mcp install
+kairos setup
 ```
 
 ## Commands
 
 | | |
 |---|---|
-| `kairos auth login` | Sign in through the browser |
+| `kairos setup` | Sign in and connect — start here |
+| `kairos auth login` | Sign in only |
 | `kairos auth status` | Who you are, and what data you can read |
 | `kairos auth logout` | Forget the local token |
 | `kairos mcp install` | Wire up Claude Code, Claude Desktop and Codex |

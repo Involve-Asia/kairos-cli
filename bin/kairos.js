@@ -92,7 +92,7 @@ async function authLogin() {
   console.log();
   ok(`Signed in as ${c.bold(body.email)}`);
   info(c.dim(`Token stored in ${CONFIG_FILE} (readable only by you)`));
-  console.log(`\nNext: ${c.bold("kairos mcp install")}\n`);
+  console.log();
 }
 
 function listen() {
@@ -262,6 +262,27 @@ function mcpInstall() {
   console.log(`\nAsk it: ${c.bold('"what Kairos data tools do you have?"')}\n`);
 }
 
+// --- setup ----------------------------------------------------------------
+
+async function setup() {
+  const cfg = readConfig();
+  if (cfg.token) {
+    // Already signed in on this machine — verify before assuming, since a
+    // revoked or expired token would otherwise be installed silently.
+    const res = await fetch(`${BASE}/api/v1/cli/whoami/`, {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    }).catch(() => null);
+    if (res && res.ok) {
+      const b = await res.json();
+      ok(`Already signed in as ${c.bold(b.email)}`);
+      return mcpInstall();
+    }
+    info(c.dim("Stored sign-in is no longer valid — signing in again."));
+  }
+  await authLogin();
+  mcpInstall();
+}
+
 // --- status / logout ------------------------------------------------------
 
 async function authStatus() {
@@ -291,6 +312,7 @@ function authLogout() {
 const USAGE = `
 ${c.bold("kairos")} — connect your AI assistant to company data
 
+  kairos setup           sign in and connect your assistant (start here)
   kairos auth login      sign in through the browser
   kairos auth status     show who you are and what you can read
   kairos auth logout     forget the local token
@@ -302,6 +324,7 @@ Docs: ${BASE}/data-access
 (async () => {
   const [a, b] = process.argv.slice(2);
   try {
+    if (a === "setup" || (!a && false)) return await setup();
     if (a === "auth" && b === "login") return await authLogin();
     if (a === "auth" && b === "status") return await authStatus();
     if (a === "auth" && b === "logout") return authLogout();
