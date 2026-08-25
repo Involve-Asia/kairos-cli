@@ -1,6 +1,6 @@
 # Kairos CLI
 
-Connects an AI assistant to Involve Asia company data through Kairos.
+Connects an AI assistant to data through Kairos.
 
 ```bash
 npx github:Involve-Asia/kairos-cli setup
