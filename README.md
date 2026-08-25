@@ -1,0 +1,56 @@
+# Kairos CLI
+
+Connects an AI assistant to Involve Asia company data through Kairos.
+
+```bash
+npx github:Involve-Asia/kairos-cli auth login
+npx github:Involve-Asia/kairos-cli mcp install
+```
+
+Or install it once:
+
+```bash
+npm i -g github:Involve-Asia/kairos-cli
+kairos auth login
+kairos mcp install
+```
+
+## Commands
+
+| | |
+|---|---|
+| `kairos auth login` | Sign in through the browser |
+| `kairos auth status` | Who you are, and what data you can read |
+| `kairos auth logout` | Forget the local token |
+| `kairos mcp install` | Wire up Claude Code, Claude Desktop and Codex |
+
+## How sign-in works
+
+`auth login` starts a listener on a random loopback port and opens Kairos in
+your browser. You approve there, in the session you already have. What comes
+back through the browser is a **one-time code**, not a token — the CLI trades
+that code for a token server-to-server.
+
+The token therefore never appears in your browser history, in an address bar,
+or in a screenshot. It is written to `~/.kairos/config.json` with mode `600`
+and nowhere else. It carries exactly the data access you already had; approving
+grants nothing new. Revoke it any time at
+[/data-access](https://kairos.invol.asia/data-access).
+
+## What `mcp install` does
+
+- **Claude Code** — `claude mcp add --transport http`
+- **Claude Desktop** — edits `claude_desktop_config.json`, backing it up first
+  and leaving your other settings untouched. Claude Desktop only supports local
+  (stdio) servers, so this configures the `mcp-remote` bridge, pinned to an
+  absolute Node 18+ path because Desktop otherwise picks the first `node` on its
+  PATH — often one too old to run it.
+- **Codex** — appends an `[mcp_servers.kairos-data]` block to
+  `~/.codex/config.toml`. Set `KAIROS_MCP_TOKEN` in your shell for it.
+
+Whichever it configures, restart the assistant afterwards, then ask it
+*"what Kairos data tools do you have?"*
+
+## Requirements
+
+Node 18 or newer. No dependencies — the whole thing is one file.
