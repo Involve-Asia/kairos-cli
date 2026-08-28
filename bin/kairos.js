@@ -275,12 +275,66 @@ async function setup() {
     if (res && res.ok) {
       const b = await res.json();
       ok(`Already signed in as ${c.bold(b.email)}`);
-      return mcpInstall();
+      mcpInstall();
+      try { skillsInstall(); } catch (e) {
+        info(c.dim(`Skills not installed (${e.message}). Run: kairos skills install`));
+      }
+      return;
     }
     info(c.dim("Stored sign-in is no longer valid — signing in again."));
   }
   await authLogin();
   mcpInstall();
+  try {
+    skillsInstall();
+  } catch (e) {
+    // Skills are guidance, not plumbing: failing to install them must not make
+    // a successful connection look like a failure.
+    info(c.dim(`Skills not installed (${e.message}). Run: kairos skills install`));
+  }
+}
+
+// --- skills ---------------------------------------------------------------
+
+const SKILL_NAMES = ["kairos-data-analysis", "kairos-work"];
+
+function skillTargets() {
+  // Claude Code reads ~/.claude/skills; Codex reads ~/.codex/skills. Install to
+  // whichever exist rather than creating homes for tools that are not there.
+  const out = [];
+  for (const [dir, label] of [[".claude", "Claude Code"], [".codex", "Codex"]]) {
+    const base = path.join(os.homedir(), dir);
+    if (fs.existsSync(base)) out.push({ dir: path.join(base, "skills"), label });
+  }
+  return out;
+}
+
+function skillsInstall() {
+  // Shipped inside this package, so the version of the guidance always matches
+  // the version of the CLI that installed it.
+  const source = path.join(__dirname, "..", "skills");
+  if (!fs.existsSync(source)) die("This build has no skills directory.");
+
+  const targets = skillTargets();
+  if (!targets.length) {
+    die("Neither ~/.claude nor ~/.codex exists — nothing to install into.\n" +
+        "Run your assistant once first, then try again.");
+  }
+
+  console.log(`\n${c.bold("Installing Kairos skills")}\n`);
+  for (const target of targets) {
+    for (const name of SKILL_NAMES) {
+      const from = path.join(source, name);
+      if (!fs.existsSync(from)) continue;
+      const to = path.join(target.dir, name);
+      fs.mkdirSync(to, { recursive: true });
+      fs.copyFileSync(path.join(from, "SKILL.md"), path.join(to, "SKILL.md"));
+    }
+    ok(`${target.label} ${c.dim(target.dir)}`);
+  }
+  info(c.dim("Re-run this after a CLI update to pick up revised guidance."));
+  console.log(`\nRestart your assistant, then ask it something like:`);
+  console.log(`  ${c.bold('"which publisher segments grew fastest last quarter?"')}\n`);
 }
 
 // --- status / logout ------------------------------------------------------
@@ -317,6 +371,7 @@ ${c.bold("kairos")} — connect your AI assistant to company data
   kairos auth status     show who you are and what you can read
   kairos auth logout     forget the local token
   kairos mcp install     wire up Claude Code / Claude Desktop / Codex
+  kairos skills install  add the analysis and work-tracking guidance
 
 Docs: ${BASE}/data-access
 `;
@@ -329,6 +384,7 @@ Docs: ${BASE}/data-access
     if (a === "auth" && b === "status") return await authStatus();
     if (a === "auth" && b === "logout") return authLogout();
     if (a === "mcp" && b === "install") return mcpInstall();
+    if (a === "skills" && b === "install") return skillsInstall();
     console.log(USAGE);
   } catch (e) {
     die(e.message || String(e));

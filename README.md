@@ -25,6 +25,7 @@ kairos setup
 | `kairos auth status` | Who you are, and what data you can read |
 | `kairos auth logout` | Forget the local token |
 | `kairos mcp install` | Wire up Claude Code, Claude Desktop and Codex |
+| `kairos skills install` | Add the analysis and work-tracking guidance |
 
 ## How sign-in works
 
@@ -52,6 +53,22 @@ grants nothing new. Revoke it any time at
 
 Whichever it configures, restart the assistant afterwards, then ask it
 *"what Kairos data tools do you have?"*
+
+## Skills
+
+`setup` also installs two skills into `~/.claude/skills` and `~/.codex/skills`:
+
+- **kairos-data-analysis** — business vs technical analysis, keeping queries
+  cheap, judging whether a difference is real, and what may never leave the
+  warehouse.
+- **kairos-work** — reading work items and logging progress back.
+
+They carry method only. Facts about your data — which tables exist, how they are
+partitioned, what is known to be wrong with them — reach an assistant through the
+MCP server, authenticated, and only for what that person may read.
+
+**This repository is public, so it must never name a table, column, database or
+business rule.** Anything of that sort belongs in the MCP server.
 
 ## Requirements
 

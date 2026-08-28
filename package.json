@@ -2,10 +2,17 @@
   "name": "@involve/kairos-cli",
   "version": "1.0.0",
   "description": "Connect your AI assistant to Kairos company data",
-  "bin": { "kairos": "bin/kairos.js" },
+  "bin": {
+    "kairos": "bin/kairos.js"
+  },
   "type": "commonjs",
-  "engines": { "node": ">=18" },
-  "files": ["bin"],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "skills"
+  ],
   "license": "UNLICENSED",
   "private": true
 }
