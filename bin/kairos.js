@@ -49,11 +49,21 @@ function requireToken() {
 }
 
 function openBrowser(url) {
-  const cmd = process.platform === "darwin" ? "open"
-    : process.platform === "win32" ? "start" : "xdg-open";
+  // Never via a shell. On Windows `start` is a cmd.exe builtin, and cmd treats
+  // `&` as a command separator -- so the URL arrives at the browser truncated at
+  // the first query parameter and the approval page sees no port. rundll32 is a
+  // real executable and takes the URL as one opaque argument.
+  const [cmd, args] = process.platform === "darwin"
+    ? ["open", [url]]
+    : process.platform === "win32"
+      ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+      : ["xdg-open", [url]];
   try {
-    spawn(cmd, [url], { stdio: "ignore", detached: true, shell: process.platform === "win32" })
-      .unref();
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    // spawn reports a missing binary asynchronously; unhandled it would take
+    // down the CLI mid-login instead of falling back to the printed link.
+    child.on("error", () => info("Could not open a browser -- paste the link above."));
+    child.unref();
     return true;
   } catch { return false; }
 }
