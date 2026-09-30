@@ -42,11 +42,6 @@ function writeConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
   fs.chmodSync(CONFIG_FILE, 0o600);
 }
-function requireToken() {
-  const { token } = readConfig();
-  if (!token) die("Not signed in. Run `kairos auth login` first.");
-  return token;
-}
 
 function openBrowser(url) {
   // Never via a shell. On Windows `start` is a cmd.exe builtin, and cmd treats
@@ -141,90 +136,52 @@ function waitForCode(server, expectedState) {
 }
 
 // --- mcp install ----------------------------------------------------------
+//
+// Claude and Cursor sign in to Kairos themselves (OAuth): no token is ever
+// written for them. Claude's connector is account-wide -- added once in
+// Settings → Connectors it serves the web, desktop, mobile and Claude Code
+// signed in with the same account -- so setup points there instead of writing
+// a second, token-based entry that would show every tool twice. Only clients
+// that cannot sign in (Codex) get a personal token.
+
+// No trailing slash: it must equal the resource Kairos declares for sign-in.
+const MCP_URL = `${BASE}/mcp`;
 
 function hasClaudeCode() {
   try { execFileSync("claude", ["--version"], { stdio: "ignore" }); return true; }
   catch { return false; }
 }
 
-function installClaudeCode(token, mcpUrl) {
+function claudeConnectorSteps() {
+  console.log(`\n${c.bold("Claude")} ${c.dim("— once, for web, desktop, mobile and Claude Code")}`);
+  info("1. In Claude, open Settings → Connectors → Add custom connector.");
+  info(`2. Name it Kairos, URL ${c.bold(MCP_URL)} — leave Advanced settings empty.`);
+  info("3. Click Connect, then Allow on the Kairos page. No token involved.");
+}
+
+function installClaudeCodeSignIn() {
+  // Replaces any earlier kairos-data entry, including a token-based one.
   try {
     execFileSync("claude", ["mcp", "remove", SERVER_NAME, "-s", "user"], { stdio: "ignore" });
   } catch { /* not previously installed */ }
-  execFileSync("claude", [
-    "mcp", "add", "--transport", "http", "-s", "user",
-    SERVER_NAME, mcpUrl, "--header", `Authorization: Bearer ${token}`,
-  ], { stdio: "ignore" });
-  return true;
+  execFileSync("claude", ["mcp", "add", "--transport", "http", "-s", "user", SERVER_NAME, MCP_URL],
+               { stdio: "ignore" });
+  ok(`Claude Code ${c.dim(`${SERVER_NAME} → ${MCP_URL}`)}`);
+  const finish = `in Claude Code run /mcp, choose ${SERVER_NAME} and Authenticate — or run ` +
+                 `\`claude mcp login ${SERVER_NAME}\` in a terminal`;
+  // `claude mcp login` needs an interactive terminal; run by an assistant it
+  // has none, so say how to finish instead of failing.
+  if (!process.stdin.isTTY) { info(`To sign in: ${finish}.`); return; }
+  info("Signing in — your browser opens on the Kairos Allow page.");
+  try {
+    execFileSync("claude", ["mcp", "login", SERVER_NAME], { stdio: "inherit" });
+  } catch {
+    info(`Sign-in didn't finish. To retry: ${finish}.`);
+  }
 }
 
-function desktopConfigPath() {
-  if (process.platform === "darwin")
-    return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  if (process.platform === "win32")
-    return path.join(process.env.APPDATA || "", "Claude", "claude_desktop_config.json");
-  return path.join(os.homedir(), ".config", "Claude", "claude_desktop_config.json");
-}
-
-function bestNode() {
-  // Claude Desktop launches with its own PATH and takes the first node it
-  // finds, which on a machine with several versions is often too old. Resolve
-  // an absolute path to one that actually works.
-  const candidates = [];
-  const nvm = path.join(os.homedir(), ".nvm", "versions", "node");
-  for (const dir of [nvm]) {
-    try { for (const v of fs.readdirSync(dir)) candidates.push(path.join(dir, v, "bin")); }
-    catch { /* not installed */ }
-  }
-  candidates.push("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", path.dirname(process.execPath));
-  let best = null, bestMajor = 0;
-  for (const dir of candidates) {
-    const node = path.join(dir, process.platform === "win32" ? "node.exe" : "node");
-    if (!fs.existsSync(node)) continue;
-    try {
-      const v = execFileSync(node, ["--version"], { encoding: "utf8" }).trim();
-      const major = parseInt(v.replace(/^v/, ""), 10);
-      if (major >= 18 && major > bestMajor) { best = dir; bestMajor = major; }
-    } catch { /* unusable */ }
-  }
-  return best;
-}
-
-function installClaudeDesktop(token, mcpUrl) {
-  const file = desktopConfigPath();
-  const nodeDir = bestNode();
-  if (!nodeDir) return { ok: false, why: "no Node 18+ found for the stdio bridge" };
-
-  let cfg = {};
-  if (fs.existsSync(file)) {
-    try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); }
-    catch { return { ok: false, why: `${file} is not valid JSON — fix or remove it` }; }
-    fs.copyFileSync(file, `${file}.bak-${Date.now()}`);
-  }
-  if (!cfg.mcpServers || typeof cfg.mcpServers !== "object") cfg.mcpServers = {};
-
-  // Repair the nesting people hit when pasting a whole config into an existing
-  // mcpServers block; an entry one level too deep is silently skipped.
-  const inner = cfg.mcpServers.mcpServers;
-  if (inner && typeof inner === "object" && !inner.command) {
-    delete cfg.mcpServers.mcpServers;
-    Object.assign(cfg.mcpServers, inner);
-  }
-
-  cfg.mcpServers[SERVER_NAME] = {
-    command: path.join(nodeDir, process.platform === "win32" ? "npx.cmd" : "npx"),
-    args: ["-y", "mcp-remote@latest", mcpUrl,
-           // The value contains a space after "Bearer", which does not survive
-           // argument parsing — hence the env indirection.
-           "--header", "Authorization:${MCP_TOKEN}", "--transport", "http-only"],
-    env: {
-      MCP_TOKEN: `Bearer ${token}`,
-      PATH: `${nodeDir}${path.delimiter}/usr/local/bin${path.delimiter}/usr/bin${path.delimiter}/bin`,
-    },
-  };
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
-  return { ok: true, file };
+function codexPresent() {
+  return fs.existsSync(path.join(os.homedir(), ".codex"));
 }
 
 function installCodex(token, mcpUrl) {
@@ -238,63 +195,121 @@ function installCodex(token, mcpUrl) {
   return { ok: true, file, needsEnv: true };
 }
 
-function mcpInstall() {
-  const cfg = readConfig();
-  const token = requireToken();
-  const mcpUrl = cfg.mcp_url || `${BASE}/mcp/`;
-  console.log(`\n${c.bold("Installing the Kairos data connector")}\n`);
-  let any = false;
-
-  if (hasClaudeCode()) {
-    try { installClaudeCode(token, mcpUrl); ok("Claude Code"); any = true; }
-    catch (e) { info(c.red(`Claude Code: ${e.message.split("\n")[0]}`)); }
-  } else {
-    info(c.dim("Claude Code — not found, skipped"));
-  }
-
-  const desktop = installClaudeDesktop(token, mcpUrl);
-  if (desktop.ok) {
-    ok(`Claude Desktop ${c.dim(desktop.file)}`);
-    info(c.dim("Quit Claude Desktop fully (Cmd-Q) and reopen for it to load."));
-    any = true;
-  } else {
-    info(c.dim(`Claude Desktop — skipped (${desktop.why})`));
-  }
-
-  const codex = installCodex(token, mcpUrl);
-  if (codex.ok) {
-    ok(`Codex ${c.dim(codex.file)}`);
-    if (codex.needsEnv) info(c.dim(`Add to your shell: export KAIROS_MCP_TOKEN=${token.slice(0, 12)}…`));
-    any = true;
-  }
-
-  if (!any) die("No supported assistant found. Install Claude Code, Claude Desktop or Codex first.");
-  console.log(`\nAsk it: ${c.bold('"what Kairos data tools do you have?"')}\n`);
-}
-
-// --- setup ----------------------------------------------------------------
-
-async function setup() {
+async function ensureToken() {
+  // Only token-based clients need this. Verify a stored token before reusing
+  // it: a revoked or expired one would otherwise be installed silently.
   const cfg = readConfig();
   if (cfg.token) {
-    // Already signed in on this machine — verify before assuming, since a
-    // revoked or expired token would otherwise be installed silently.
     const res = await fetch(`${BASE}/api/v1/cli/whoami/`, {
       headers: { Authorization: `Bearer ${cfg.token}` },
     }).catch(() => null);
     if (res && res.ok) {
       const b = await res.json();
-      ok(`Already signed in as ${c.bold(b.email)}`);
-      mcpInstall();
-      try { skillsInstall(); } catch (e) {
-        info(c.dim(`Skills not installed (${e.message}). Run: kairos skills install`));
-      }
-      return;
+      ok(`Signed in as ${c.bold(b.email)}`);
+      return readConfig().token;
     }
     info(c.dim("Stored sign-in is no longer valid — signing in again."));
   }
   await authLogin();
-  mcpInstall();
+  return readConfig().token;
+}
+
+async function installCodexWithToken() {
+  const token = await ensureToken();
+  const codex = installCodex(token, MCP_URL);
+  if (codex.ok) {
+    ok(`Codex ${c.dim(codex.file)}`);
+    if (codex.needsEnv) info(c.dim(`Add to your shell: export KAIROS_MCP_TOKEN=${token.slice(0, 12)}…`));
+  }
+}
+
+async function mcpInstall() {
+  const claudeCode = process.argv.includes("--claude-code");
+  console.log(`\n${c.bold("Connecting your assistants to Kairos")}`);
+  claudeConnectorSteps();
+
+  if (claudeCode) {
+    if (!hasClaudeCode()) die("--claude-code given, but the claude command was not found.");
+    console.log();
+    installClaudeCodeSignIn();
+  } else if (hasClaudeCode()) {
+    info(c.dim("Claude Code on an API key instead of a Claude account? Run: kairos setup --claude-code"));
+  }
+
+  if (codexPresent()) {
+    console.log(`\n${c.bold("Codex")} ${c.dim("— signs in with a personal token")}`);
+    await installCodexWithToken();
+  }
+
+  const legacy = findLegacyInstalls();
+  if (legacy.length) {
+    console.log(`\n${c.bold("Older token-based entries found")}`);
+    for (const l of legacy) info(`• ${l.where}`);
+    info("With the Claude connector added, these make every Kairos tool appear twice.");
+    info(`Once the connector works, run ${c.bold("kairos cleanup")} to remove them.`);
+  }
+}
+
+// --- cleanup ----------------------------------------------------------------
+//
+// Earlier versions wrote a personal token into Claude Code and Claude Desktop.
+// Only the entries this CLI created are touched: the kairos-data name with a
+// Kairos token in it. Anything else is left alone.
+
+function desktopConfigPath() {
+  if (process.platform === "darwin")
+    return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  if (process.platform === "win32")
+    return path.join(process.env.APPDATA || "", "Claude", "claude_desktop_config.json");
+  return path.join(os.homedir(), ".config", "Claude", "claude_desktop_config.json");
+}
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+}
+
+function hasKairosToken(entry) {
+  return JSON.stringify(entry || {}).includes("Bearer kai_mcp_");
+}
+
+function findLegacyInstalls() {
+  const found = [];
+  const code = readJson(path.join(os.homedir(), ".claude.json"));
+  if (code && code.mcpServers && hasKairosToken(code.mcpServers[SERVER_NAME]))
+    found.push({ kind: "claude-code", where: `Claude Code: ${SERVER_NAME} (token in ~/.claude.json)` });
+  const desktopFile = desktopConfigPath();
+  const desktop = readJson(desktopFile);
+  if (desktop && desktop.mcpServers && hasKairosToken(desktop.mcpServers[SERVER_NAME]))
+    found.push({ kind: "claude-desktop", file: desktopFile,
+                 where: `Claude Desktop: ${SERVER_NAME} (token in ${desktopFile})` });
+  return found;
+}
+
+function cleanup() {
+  const legacy = findLegacyInstalls();
+  if (!legacy.length) { ok("No older token-based Kairos entries found."); return; }
+  console.log(`\n${c.bold("Removing older token-based Kairos entries")}\n`);
+  for (const l of legacy) {
+    if (l.kind === "claude-code") {
+      execFileSync("claude", ["mcp", "remove", SERVER_NAME, "-s", "user"], { stdio: "ignore" });
+      ok("Claude Code");
+    } else {
+      const cfg = readJson(l.file);
+      fs.copyFileSync(l.file, `${l.file}.bak-${Date.now()}`);
+      delete cfg.mcpServers[SERVER_NAME];
+      fs.writeFileSync(l.file, JSON.stringify(cfg, null, 2) + "\n");
+      ok(`Claude Desktop ${c.dim("(backup kept next to the file)")}`);
+      info(c.dim("Quit Claude Desktop fully (Cmd-Q) and reopen."));
+    }
+  }
+  info(`The token itself still exists — revoke it at ${BASE}/data-access if nothing else uses it.`);
+  console.log();
+}
+
+// --- setup ----------------------------------------------------------------
+
+async function setup() {
+  await mcpInstall();
   try {
     skillsInstall();
   } catch (e) {
@@ -376,11 +391,14 @@ function authLogout() {
 const USAGE = `
 ${c.bold("kairos")} — connect your AI assistant to company data
 
-  kairos setup           sign in and connect your assistant (start here)
-  kairos auth login      sign in through the browser
+  kairos setup           connect your assistants (start here)
+  kairos setup --claude-code
+                         also add Kairos to Claude Code and sign in (for Claude
+                         Code on an API key rather than a Claude account)
+  kairos cleanup         remove token-based entries older versions created
+  kairos auth login      get a personal token (for Codex and scripts)
   kairos auth status     show who you are and what you can read
   kairos auth logout     forget the local token
-  kairos mcp install     wire up Claude Code / Claude Desktop / Codex
   kairos skills install  add the analysis and work-tracking guidance
 
 Docs: ${BASE}/data-access
@@ -393,7 +411,8 @@ Docs: ${BASE}/data-access
     if (a === "auth" && b === "login") return await authLogin();
     if (a === "auth" && b === "status") return await authStatus();
     if (a === "auth" && b === "logout") return authLogout();
-    if (a === "mcp" && b === "install") return mcpInstall();
+    if (a === "mcp" && b === "install") return await mcpInstall();
+    if (a === "cleanup") return cleanup();
     if (a === "skills" && b === "install") return skillsInstall();
     console.log(USAGE);
   } catch (e) {
